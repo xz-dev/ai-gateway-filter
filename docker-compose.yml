@@ -1,0 +1,7 @@
+services:
+  privacy-gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PRIVACY_GATEWAY_MAX_SENSITIVE_STREAM_WINDOW: "4096"
