@@ -161,13 +161,13 @@ pass "text round trip"
 
 log "invalid text key rejected on encrypt"
 request_json POST /encrypt "$(json_payload text 'My name is James Bond' short)"
-assert_status 422
+assert_status 400
 assert_detail "$RESP_BODY" 'crypto_key must be 16, 24, 32 bytes for Presidio AES encryption; got 5 bytes'
 pass "invalid encrypt key"
 
 log "invalid text key rejected on decrypt"
 request_json POST /decrypt "$(json_payload text encrypted-placeholder short)"
-assert_status 422
+assert_status 400
 assert_detail "$RESP_BODY" 'crypto_key must be 16, 24, 32 bytes for Presidio AES encryption; got 5 bytes'
 pass "invalid decrypt key"
 
@@ -182,7 +182,7 @@ payload["crypto_key"] = "WrongSecretKey!!"
 print(json.dumps(payload))
 PY
 request_json POST /decrypt "$(cat "$wrong_text_payload")"
-assert_status 422
+assert_status 400
 assert_detail "$RESP_BODY" 'content cannot be decrypted with provided crypto_key'
 assert_json_absent "$RESP_BODY" content
 pass "wrong text key"
@@ -203,7 +203,7 @@ pass "image round trip"
 
 log "invalid image base64 rejected"
 request_json POST /encrypt "$(json_payload image 'not-base64!' 'image-secret-key')"
-assert_status 422
+assert_status 400
 assert_detail "$RESP_BODY" 'content must be a valid base64 image string'
 assert_json_absent "$RESP_BODY" content
 pass "invalid image base64"
@@ -219,7 +219,7 @@ payload["crypto_key"] = "wrong-image-key"
 print(json.dumps(payload))
 PY
 request_json POST /decrypt "$(cat "$wrong_image_payload")"
-assert_status 422
+assert_status 400
 assert_detail "$RESP_BODY" 'content cannot be decrypted with provided crypto_key'
 assert_json_absent "$RESP_BODY" content
 pass "wrong image key"

@@ -260,7 +260,7 @@ curl --request POST http://127.0.0.1:8000/encrypt \
 Invalid text `crypto_key` response:
 
 ```http
-HTTP/1.1 422 Unprocessable Entity
+HTTP/1.1 400 Bad Request
 ```
 
 ```json
@@ -457,8 +457,8 @@ PRIVACY_GATEWAY_MAX_SENSITIVE_STREAM_WINDOW: "4096"
 
 | Case | Status | Response |
 | --- | --- | --- |
-| Invalid text key length | `422` | `{"detail":"crypto_key must be 16, 24, 32 bytes for Presidio AES encryption; got N bytes"}` |
-| Wrong text decrypt key | `422` | `{"detail":"content cannot be decrypted with provided crypto_key"}` |
-| Invalid image base64 on encrypt | `422` | `{"detail":"content must be a valid base64 image string"}` |
-| Wrong image decrypt key | `422` | `{"detail":"content cannot be decrypted with provided crypto_key"}` |
+| Invalid text key length | `400` | `{"detail":"crypto_key must be 16, 24, 32 bytes for Presidio AES encryption; got N bytes"}` |
+| Wrong text decrypt key | `400` | `{"detail":"content cannot be decrypted with provided crypto_key"}` |
+| Invalid image base64 on encrypt | `400` | `{"detail":"content must be a valid base64 image string"}` |
+| Wrong image decrypt key | `400` | `{"detail":"content cannot be decrypted with provided crypto_key"}` |
 | Sensitive phrase detected | `422` | `{"detected_word":"...","type":"Prompt Injection"}` |

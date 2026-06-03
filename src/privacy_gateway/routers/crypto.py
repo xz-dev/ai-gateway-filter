@@ -19,15 +19,15 @@ def encrypt(payload: CryptoEnvelope) -> CryptoEnvelope:
         try:
             return _with_content(payload, _text_crypto.encrypt(payload.content, payload.crypto_key))
         except TextCryptoKeyError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if payload.type == PayloadType.IMAGE:
         try:
             return _with_content(payload, _image_crypto.encrypt(payload.content, payload.crypto_key))
         except ImageCryptoError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="unsupported type")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported type")
 
 
 @router.post("/decrypt", response_model=CryptoEnvelope)
@@ -36,10 +36,10 @@ def decrypt(payload: CryptoEnvelope) -> CryptoEnvelope:
         try:
             return _with_content(payload, _text_crypto.decrypt(payload.content, payload.crypto_key))
         except TextCryptoKeyError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - Presidio raises low-level crypto errors
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="content cannot be decrypted with provided crypto_key",
             ) from exc
 
@@ -47,6 +47,6 @@ def decrypt(payload: CryptoEnvelope) -> CryptoEnvelope:
         try:
             return _with_content(payload, _image_crypto.decrypt(payload.content, payload.crypto_key))
         except ImageCryptoError as exc:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="unsupported type")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="unsupported type")
