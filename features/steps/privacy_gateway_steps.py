@@ -29,6 +29,14 @@ def step_decrypt_last(context):
     context.last_crypto_response = _json(context.response)
 
 
+@when('I decrypt the last crypto response using crypto key "{crypto_key}"')
+def step_decrypt_last_with_key(context, crypto_key):
+    payload = dict(context.last_crypto_response)
+    payload["crypto_key"] = crypto_key
+    context.response = context.client.post("/decrypt", json=payload)
+    context.last_crypto_response = _json(context.response)
+
+
 @when('I decrypt a text payload "{content}" using crypto key "{crypto_key}"')
 def step_decrypt_text(context, content, crypto_key):
     context.response = context.client.post(
@@ -79,6 +87,12 @@ def step_json_field_equals(context, field, expected):
 def step_json_field_not_equals(context, field, unexpected):
     actual = _json(context.response)[field]
     assert actual != unexpected, f"expected {field} to differ from {unexpected!r}"
+
+
+@then('the response field "{field}" should be absent')
+def step_json_field_absent(context, field):
+    payload = _json(context.response)
+    assert field not in payload, f"expected {field} to be absent, got {payload[field]!r}"
 
 
 @then('the response detail should be "{expected}"')

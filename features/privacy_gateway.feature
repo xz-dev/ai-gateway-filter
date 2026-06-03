@@ -22,6 +22,14 @@ Feature: Privacy Gateway crypto and sensitive-word APIs
     Then the response status should be 422
     And the response detail should be "crypto_key must be 16, 24, 32 bytes for Presidio AES encryption; got 5 bytes"
 
+  Scenario: Text encrypted with wrong crypto key cannot decrypt
+    When I encrypt a text payload "My name is James Bond" using crypto key "WmZq4t7w!z%C&F)J"
+    Then the response status should be 200
+    When I decrypt the last crypto response using crypto key "WrongSecretKey!!"
+    Then the response status should be 422
+    And the response detail should be "content cannot be decrypted with provided crypto_key"
+    And the response field "content" should be absent
+
   Scenario: Encrypt and decrypt image base64 with caller-provided crypto key
     When I encrypt an image payload "iVBORw0KGgo=" using crypto key "image-secret-key"
     Then the response status should be 200
@@ -32,6 +40,20 @@ Feature: Privacy Gateway crypto and sensitive-word APIs
     Then the response status should be 200
     And the response field "type" should be "image"
     And the response field "content" should be "iVBORw0KGgo="
+
+  Scenario: Invalid image base64 cannot encrypt
+    When I encrypt an image payload "not-base64!" using crypto key "image-secret-key"
+    Then the response status should be 422
+    And the response detail should be "content must be a valid base64 image string"
+    And the response field "content" should be absent
+
+  Scenario: Image encrypted with wrong crypto key cannot decrypt
+    When I encrypt an image payload "iVBORw0KGgo=" using crypto key "image-secret-key"
+    Then the response status should be 200
+    When I decrypt the last crypto response using crypto key "wrong-image-key"
+    Then the response status should be 422
+    And the response detail should be "content cannot be decrypted with provided crypto_key"
+    And the response field "content" should be absent
 
   Scenario: Allowed non-streaming text passes sensitive-word check
     When I check non-stream text "Please summarize this document."
