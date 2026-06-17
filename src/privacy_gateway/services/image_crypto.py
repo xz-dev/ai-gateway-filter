@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 import base64
 import hashlib
 
 from cryptography.fernet import Fernet, InvalidToken
 
-
-class ImageCryptoError(ValueError):
-    pass
+from privacy_gateway.errors import ImageCryptoError
 
 
 class ImageCryptoService:

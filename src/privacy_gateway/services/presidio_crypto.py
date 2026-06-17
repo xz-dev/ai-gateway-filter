@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 from presidio_anonymizer.operators import Decrypt, Encrypt
+
+from privacy_gateway.errors import TextCryptoError, TextCryptoKeyError
 
 
 VALID_AES_KEY_BYTE_LENGTHS = {16, 24, 32}
-
-
-class TextCryptoKeyError(ValueError):
-    pass
 
 
 class TextCryptoService:
@@ -30,4 +30,8 @@ class TextCryptoService:
 
     def decrypt(self, content: str, crypto_key: str) -> str:
         self.validate_crypto_key(crypto_key)
-        return self._decrypt.operate(text=content, params={"key": crypto_key})
+        try:
+            return self._decrypt.operate(text=content, params={"key": crypto_key})
+        except Exception as exc:
+            # keep existing message for compatibility with tests/docs
+            raise TextCryptoError("content cannot be decrypted with provided crypto_key") from exc
