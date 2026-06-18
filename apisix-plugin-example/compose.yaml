@@ -29,7 +29,7 @@ services:
       dockerfile: apisix-plugin-example/runner/Dockerfile
     environment:
       APISIX_LISTEN_ADDRESS: unix:/var/run/apisix-python-runner/runner.sock
-      PRIVACY_GATEWAY_PASSWORD: 7xH8nQ2rT5vW9yZ1aBcD3eFgH4jK6mNp
+      PRIVACY_GATEWAY_PASSWORD: example-password-change-me
       PRIVACY_GATEWAY_REQUIRE_SPACY_MODEL: "1"
       PRIVACY_GATEWAY_SPACY_MODEL: en_core_web_sm
       PRIVACY_GATEWAY_CRYPTO_KEY: WmZq4t7w!z%C&F)J
@@ -46,7 +46,7 @@ services:
     environment:
       PRIVACY_PROXY_UPSTREAM_HOST: upstream
       PRIVACY_PROXY_UPSTREAM_PORT: "8081"
-      PRIVACY_GATEWAY_PASSWORD: 7xH8nQ2rT5vW9yZ1aBcD3eFgH4jK6mNp
+      PRIVACY_GATEWAY_PASSWORD: example-password-change-me
       PRIVACY_GATEWAY_REQUIRE_SPACY_MODEL: "1"
       PRIVACY_GATEWAY_SPACY_MODEL: en_core_web_sm
       PRIVACY_GATEWAY_CRYPTO_KEY: WmZq4t7w!z%C&F)J
@@ -87,7 +87,7 @@ services:
       - upstream
     environment:
       APISIX_BASE_URL: http://apisix:9080
-      PRIVACY_GATEWAY_PASSWORD: 7xH8nQ2rT5vW9yZ1aBcD3eFgH4jK6mNp
+      PRIVACY_GATEWAY_PASSWORD: example-password-change-me
       PRIVACY_GATEWAY_REQUIRE_SPACY_MODEL: "1"
       PRIVACY_GATEWAY_SPACY_MODEL: en_core_web_sm
       PRIVACY_GATEWAY_CRYPTO_KEY: WmZq4t7w!z%C&F)J

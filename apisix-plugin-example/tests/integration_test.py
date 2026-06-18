@@ -13,7 +13,7 @@ from privacy_gateway.config import get_settings
 
 BASE_URL = os.environ.get("APISIX_BASE_URL", "http://apisix:9080").rstrip("/")
 SETTINGS = get_settings()
-PRIVACY_PASSWORD = SETTINGS.privacy_password or "7xH8nQ2rT5vW9yZ1aBcD3eFgH4jK6mNp"
+PRIVACY_PASSWORD = SETTINGS.privacy_password or "example-password-change-me"
 FILTER = PrivacyGatewayFilter.from_settings(SETTINGS)
 
 
