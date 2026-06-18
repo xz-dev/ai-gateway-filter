@@ -397,6 +397,14 @@ def step_configure_privacy_filter(context, password):
     context.second_protected_text = None
 
 
+@when('I set the privacy filter sensitive phrase to "{phrase}"')
+def step_set_privacy_filter_sensitive_phrase(context, phrase):
+    context.gateway_with_phrases = PrivacyGatewayFilter(
+        privacy_password=context.privacy_password,
+        sensitive_phrases=[phrase],
+    )
+
+
 @when("I configure a privacy filter without password")
 def step_configure_privacy_filter_without_password(context):
     context.gateway_with_phrases = PrivacyGatewayFilter(privacy_password=None, crypto_key=None)

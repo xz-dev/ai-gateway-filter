@@ -72,6 +72,9 @@ apisix-plugin-example/
   are replaced by `<secret:1:...>` tokens.
 - Successful responses include an informational header:
   `X-Privacy-Protection: secret-tokenized`.
+  This header is only an observability marker; restoration depends on the
+  self-describing `<secret:1:...>` tokens in the body and still works if an
+  intermediate gateway strips response headers.
 - Any forward or reverse prompt-injection match returns a JSON HTTP error.
 
 Demo password used by compose:
@@ -135,9 +138,12 @@ Expected output:
 
 ```text
 PASS assert_allowed_plaintext_is_tokenized_on_response
+PASS assert_response_body_restores_without_privacy_marker_header
 PASS assert_secret_token_request_restored_without_header
 PASS assert_json_string_values_are_processed_by_gateway
+PASS assert_json_secret_token_request_restored_without_header
 PASS assert_plaintext_forward_injection_blocked_by_runner
+PASS assert_encrypted_header_does_not_bypass_runner
 PASS assert_restored_forward_injection_blocked_by_proxy
 PASS assert_reverse_injection_blocked
 PASS full APISIX privacy gateway integration
@@ -156,7 +162,8 @@ curl -i http://localhost:9080/echo?manual=plain \
 Expected:
 
 - HTTP `200`.
-- Header `X-Privacy-Protection: secret-tokenized`.
+- Header `X-Privacy-Protection: secret-tokenized` may be present as an
+  informational marker.
 - Body is JSON text with PII values replaced by `<secret:1:...>` tokens.
 - The response body should not contain `zhangsan@example.com` in plaintext.
 

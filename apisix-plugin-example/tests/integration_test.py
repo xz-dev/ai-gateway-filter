@@ -59,8 +59,14 @@ def request(
 
 
 def restore_response_text(result: HTTPResult) -> str:
-    assert result.headers.get("x-privacy-protection") == "secret-tokenized", result.headers
+    # Restoration depends only on self-describing <secret:1:...> tokens in the
+    # body. X-Privacy-Protection is an optional observability marker and may be
+    # stripped by intermediate gateways.
     return FILTER.restore_privacy_text(result.body, privacy_password=PRIVACY_PASSWORD)
+
+
+def assert_privacy_marker_header(result: HTTPResult) -> None:
+    assert result.headers.get("x-privacy-protection") == "secret-tokenized", result.headers
 
 
 def protect_secret(text: str) -> str:
@@ -74,7 +80,7 @@ def wait_for_route() -> None:
         try:
             result = request("/echo?wait=1", "route warmup")
             last = f"status={result.status} body={result.body[:200]}"
-            if result.status == 200 and result.headers.get("x-privacy-protection") == "secret-tokenized":
+            if result.status == 200:
                 restore_response_text(result)
                 return
         except Exception as exc:  # noqa: BLE001 - startup retry loop
@@ -86,6 +92,7 @@ def wait_for_route() -> None:
 def assert_allowed_plaintext_is_tokenized_on_response() -> None:
     result = request("/echo?case=plain", "hello zhangsan@example.com from transparent proxy")
     assert result.status == 200, result
+    assert_privacy_marker_header(result)
     assert "zhangsan@example.com" not in result.body, result.body
     assert "<secret:1:" in result.body, result.body
     restored = restore_response_text(result)
@@ -95,6 +102,19 @@ def assert_allowed_plaintext_is_tokenized_on_response() -> None:
     assert payload["query"] == "case=plain", payload
     assert payload["body"] == "hello zhangsan@example.com from transparent proxy", payload
     assert payload["privacy_proxy_header"] == "restored", payload
+
+
+def assert_response_body_restores_without_privacy_marker_header() -> None:
+    result = request("/echo?case=marker-independent", "hello zhangsan@example.com")
+    assert result.status == 200, result
+    stripped = HTTPResult(
+        status=result.status,
+        body=result.body,
+        headers={key: value for key, value in result.headers.items() if key != "x-privacy-protection"},
+    )
+    restored = restore_response_text(stripped)
+    payload = json.loads(restored)
+    assert payload["body"] == "hello zhangsan@example.com", payload
 
 
 def assert_secret_token_request_restored_without_header() -> None:
@@ -185,6 +205,7 @@ def main() -> int:
     wait_for_route()
     checks = [
         assert_allowed_plaintext_is_tokenized_on_response,
+        assert_response_body_restores_without_privacy_marker_header,
         assert_secret_token_request_restored_without_header,
         assert_json_string_values_are_processed_by_gateway,
         assert_json_secret_token_request_restored_without_header,
