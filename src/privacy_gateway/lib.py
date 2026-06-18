@@ -5,7 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from privacy_gateway.config import DEFAULT_PROMPT_INJECTION_PHRASES, PrivacyGatewaySettings, get_settings
+from privacy_gateway.config import (
+    DEFAULT_PII_ENTITIES,
+    DEFAULT_PROMPT_INJECTION_PHRASES,
+    DEFAULT_SECRET_TOKEN_LABEL,
+    DEFAULT_SECRET_TOKEN_VERSION,
+    DEFAULT_SPACY_MODEL,
+    DEFAULT_REQUIRE_SPACY_MODEL,
+    PrivacyGatewaySettings,
+    get_settings,
+)
 from privacy_gateway.errors import (
     ImageCryptoError,
     PrivacyGatewayError,
@@ -14,7 +23,10 @@ from privacy_gateway.errors import (
     UnsupportedPayloadTypeError,
 )
 from privacy_gateway.services.image_crypto import ImageCryptoService
+from privacy_gateway.services.pii_detection import PiiDetectionService, PiiSpan
 from privacy_gateway.services.presidio_crypto import TextCryptoService
+from privacy_gateway.services.privacy_text import TextPrivacyService
+from privacy_gateway.services.privacy_tokens import SecretTokenService
 from privacy_gateway.services.sensitive_words import SensitiveMatch, SensitiveWordService
 
 
@@ -120,6 +132,12 @@ class PrivacyGatewayFilter:
         sensitive_phrases: Sequence[str] | None = None,
         max_sensitive_stream_window: int = 4096,
         crypto_key: str | None = None,
+        privacy_password: str | None = None,
+        pii_entities: Sequence[str] | None = None,
+        secret_token_label: str = DEFAULT_SECRET_TOKEN_LABEL,
+        secret_token_version: str = DEFAULT_SECRET_TOKEN_VERSION,
+        spacy_model: str = DEFAULT_SPACY_MODEL,
+        require_spacy_model: bool = DEFAULT_REQUIRE_SPACY_MODEL,
     ) -> None:
         sanitized_phrases = _sanitize_sensitive_phrases(sensitive_phrases)
         self._sensitive_phrases = (
@@ -129,9 +147,24 @@ class PrivacyGatewayFilter:
         )
         self._max_sensitive_stream_window = max(int(max_sensitive_stream_window), 1)
         self._crypto_key = crypto_key
+        self._privacy_password = privacy_password or crypto_key
         self._text_crypto = TextCryptoService()
         self._image_crypto = ImageCryptoService()
         self._sensitive = SensitiveWordService(self._sensitive_phrases)
+        self._secret_tokens = SecretTokenService(
+            crypto=self._text_crypto,
+            label=secret_token_label,
+            version=secret_token_version,
+        )
+        self._privacy_text = TextPrivacyService(
+            token_service=self._secret_tokens,
+            detector=PiiDetectionService(
+                entities=pii_entities or DEFAULT_PII_ENTITIES,
+                token_service=self._secret_tokens,
+                spacy_model=spacy_model,
+                require_spacy_model=require_spacy_model,
+            ),
+        )
 
     @classmethod
     def from_settings(cls, settings: PrivacyGatewaySettings | None = None) -> "PrivacyGatewayFilter":
@@ -144,6 +177,12 @@ class PrivacyGatewayFilter:
             sensitive_phrases=settings.prompt_injection_phrases,
             max_sensitive_stream_window=settings.max_sensitive_stream_window,
             crypto_key=getattr(settings, "crypto_key", None),
+            privacy_password=getattr(settings, "privacy_password", None),
+            pii_entities=getattr(settings, "pii_entities", None),
+            secret_token_label=getattr(settings, "secret_token_label", DEFAULT_SECRET_TOKEN_LABEL),
+            secret_token_version=getattr(settings, "secret_token_version", DEFAULT_SECRET_TOKEN_VERSION),
+            spacy_model=getattr(settings, "spacy_model", DEFAULT_SPACY_MODEL),
+            require_spacy_model=getattr(settings, "require_spacy_model", False),
         )
 
     def _resolve_crypto_key(self, crypto_key: str | None) -> str:
@@ -152,6 +191,15 @@ class PrivacyGatewayFilter:
         if self._crypto_key is not None:
             return self._crypto_key
         raise TextCryptoKeyError("crypto_key is required")
+
+    def _resolve_privacy_password(self, privacy_password: str | None = None, crypto_key: str | None = None) -> str:
+        if privacy_password is not None:
+            return privacy_password
+        if crypto_key is not None:
+            return crypto_key
+        if self._privacy_password is not None:
+            return self._privacy_password
+        raise TextCryptoKeyError("privacy password is required")
 
     def encrypt_text(self, content: str, crypto_key: str | None = None) -> str:
         """Encrypt text without returning or storing the crypto key in a result object."""
@@ -199,7 +247,12 @@ class PrivacyGatewayFilter:
         crypto_key: str | None = None,
         encrypted: bool = False,
     ) -> TextProcessingResult:
-        """Decrypt encrypted inbound text when requested, then check it for blocking phrases."""
+        """Decrypt encrypted inbound text when requested, then check it for blocking phrases.
+
+        This legacy helper is kept for existing integrations. New integrations
+        should prefer :meth:`process_inbound_privacy_text`, which detects and
+        restores ``<secret:1:...>`` tokens without a special header.
+        """
 
         try:
             plaintext = self.decrypt_text(content, crypto_key) if encrypted and content else content
@@ -241,12 +294,90 @@ class PrivacyGatewayFilter:
                 error=TextProcessingError(code="text_encryption_failed", message=str(exc)),
             )
 
+    def detect_pii(self, text: str) -> list[PiiSpan]:
+        """Detect PII spans in natural-language text."""
+
+        return self._privacy_text.detect(text)
+
+    def protect_secret(self, content: str, *, privacy_password: str | None = None) -> str:
+        """Encrypt one caller-selected value as a ``<secret:1:...>`` token."""
+
+        return self._privacy_text.protect_secret(
+            content,
+            self._resolve_privacy_password(privacy_password=privacy_password),
+        )
+
+    def restore_privacy_text(self, content: str, *, privacy_password: str | None = None) -> str:
+        """Restore all ``<secret:1:...>`` tokens in natural-language text."""
+
+        return self._privacy_text.restore_text(
+            content,
+            self._resolve_privacy_password(privacy_password=privacy_password),
+        )
+
+    def protect_privacy_text(self, content: str, *, privacy_password: str | None = None) -> str:
+        """Replace detected PII entities with reversible ``<secret:1:...>`` tokens."""
+
+        return self._privacy_text.protect_text(
+            content,
+            self._resolve_privacy_password(privacy_password=privacy_password),
+        )
+
+    def process_inbound_privacy_text(
+        self,
+        content: str,
+        *,
+        privacy_password: str | None = None,
+    ) -> TextProcessingResult:
+        """Restore secret tokens automatically, then run prompt-injection checks."""
+
+        try:
+            plaintext = self.restore_privacy_text(content, privacy_password=privacy_password)
+        except TextCryptoError as exc:
+            return TextProcessingResult(
+                content="",
+                decision=FilterDecision.allow(),
+                error=TextProcessingError(code="secret_token_decryption_failed", message=str(exc)),
+            )
+
+        decision = self.check_text(plaintext)
+        return TextProcessingResult(content=plaintext if not decision.blocked else "", decision=decision)
+
+    def process_outbound_privacy_text(
+        self,
+        content: str,
+        *,
+        privacy_password: str | None = None,
+    ) -> TextProcessingResult:
+        """Check plaintext output, then replace detected PII with secret tokens."""
+
+        decision = self.check_text(content)
+        if decision.blocked:
+            return TextProcessingResult(content="", decision=decision)
+
+        try:
+            return TextProcessingResult(
+                content=self.protect_privacy_text(content, privacy_password=privacy_password),
+                decision=decision,
+            )
+        except TextCryptoError as exc:
+            return TextProcessingResult(
+                content="",
+                decision=decision,
+                error=TextProcessingError(code="secret_token_encryption_failed", message=str(exc)),
+            )
+
     def check_text(self, text: str) -> FilterDecision:
         """Evaluate non-stream text and return a filter decision."""
 
-        match = self._sensitive.find(text)
-        if match:
-            return FilterDecision.block(match)
+        candidates = [text]
+        masked = self._privacy_text.strip_tokens(text)
+        if masked != text:
+            candidates.append(masked)
+        for candidate in candidates:
+            match = self._sensitive.find(candidate)
+            if match:
+                return FilterDecision.block(match)
         return FilterDecision.allow()
 
     def stream_matcher(self, *, max_window: int | None = None) -> SensitiveTextStreamDetector:
@@ -268,6 +399,7 @@ __all__ = [
     "PrivacyGatewayFilter",
     "SensitiveMatch",
     "SensitiveTextStreamDetector",
+    "PiiSpan",
     "TextProcessingError",
     "TextProcessingResult",
     "UnsupportedPayloadTypeError",

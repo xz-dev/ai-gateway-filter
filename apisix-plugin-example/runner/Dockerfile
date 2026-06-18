@@ -21,6 +21,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
 COPY pyproject.toml README.md /opt/privacy-gateway/
 COPY src /opt/privacy-gateway/src
 RUN python -m pip install --no-cache-dir -e /opt/privacy-gateway
+RUN python -m spacy download en_core_web_sm
 
 COPY apisix-plugin-example/runner/conf/config.yaml /opt/apisix-python-plugin-runner/conf/config.yaml
 COPY apisix-plugin-example/runner/apisix/plugins/privacy_gateway_guard.py /opt/apisix-python-plugin-runner/apisix/plugins/privacy_gateway_guard.py

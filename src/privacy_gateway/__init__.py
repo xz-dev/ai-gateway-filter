@@ -4,6 +4,7 @@ The package intentionally exposes only gateway-agnostic core primitives for:
 - recognition/detection of sensitive phrases
 - block decision handling
 - text/image crypto encrypt/decrypt primitives
+- reversible natural-language PII tokenization with ``<secret:1:...>`` tokens
 """
 
 from privacy_gateway.lib import (  # noqa: F401
@@ -13,6 +14,7 @@ from privacy_gateway.lib import (  # noqa: F401
     PrivacyGatewayFilter,
     SensitiveMatch,
     SensitiveTextStreamDetector,
+    PiiSpan,
     ImageCryptoError,
     TextCryptoError,
     TextCryptoKeyError,
@@ -28,6 +30,7 @@ __all__ = [
     "PrivacyGatewayFilter",
     "SensitiveMatch",
     "SensitiveTextStreamDetector",
+    "PiiSpan",
     "TextCryptoError",
     "TextCryptoKeyError",
     "TextProcessingError",

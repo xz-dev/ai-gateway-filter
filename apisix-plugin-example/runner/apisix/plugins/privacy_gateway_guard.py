@@ -8,7 +8,7 @@ from apisix.runner.http.request import Request
 from apisix.runner.http.response import Response
 from apisix.runner.plugin.core import PluginBase
 from privacy_gateway import PrivacyGatewayFilter
-from privacy_gateway.adapters.http import DEFAULT_ENCRYPTED_HEADER, build_block_error, get_header, is_truthy_header
+from privacy_gateway.adapters.http import build_block_error, get_header
 from privacy_gateway.config import get_settings
 
 _DEFAULT_FILTER = PrivacyGatewayFilter.from_settings(get_settings())
@@ -54,10 +54,6 @@ def _parse_conf(conf: Any) -> dict[str, Any]:
 
 
 def _should_inspect(headers: dict[str, str], conf: dict[str, Any]) -> bool:
-    encrypted_header = str(conf.get("skip_when_encrypted_header", DEFAULT_ENCRYPTED_HEADER))
-    if is_truthy_header(get_header(headers, encrypted_header)):
-        return False
-
     content_type = (get_header(headers, "content-type") or "").split(";", 1)[0].strip().casefold()
     if not content_type:
         # If the client sends a body without Content-Type, assume text for safety.
@@ -73,9 +69,11 @@ def _should_inspect(headers: dict[str, str], conf: dict[str, Any]) -> bool:
 class PrivacyGatewayGuard(PluginBase):
     """Fast pre-request APISIX external plugin for plaintext injection blocking.
 
-    The full decrypt/check/encrypt flow is implemented in the privacy proxy
+    The full token restore/protect flow is implemented in the privacy proxy
     sidecar. This plugin is intentionally small and cheap: it blocks obvious
     plaintext injection attempts before APISIX spends time proxying the request.
+    It never trusts or skips based on an encrypted marker header; ``<secret:1:...>``
+    token contents are masked by ``PrivacyGatewayFilter.check_text``.
     """
 
     def name(self) -> str:

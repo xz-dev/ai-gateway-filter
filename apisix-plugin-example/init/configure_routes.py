@@ -58,7 +58,6 @@ def configure_route() -> None:
             "application/json",
             "application/x-www-form-urlencoded",
         ],
-        "skip_when_encrypted_header": "X-Privacy-Encrypted",
     }
     route = {
         "name": "privacy-gateway-proxy",

@@ -384,3 +384,86 @@ def step_error_hierarchy(context):
     assert issubclass(context.api_exported_classes["TextCryptoKeyError"], PrivacyGatewayError)
     assert issubclass(context.api_exported_classes["ImageCryptoError"], PrivacyGatewayError)
     assert issubclass(context.api_exported_classes["UnsupportedPayloadTypeError"], PrivacyGatewayError)
+
+
+@when('I configure a privacy filter with password "{password}"')
+def step_configure_privacy_filter(context, password):
+    context.gateway_with_phrases = PrivacyGatewayFilter(privacy_password=password)
+    context.privacy_password = password
+    context.last_protected_text = None
+    context.last_restored_text = None
+
+
+def _privacy_filter(context) -> PrivacyGatewayFilter:
+    return getattr(context, "gateway_with_phrases", gateway)
+
+
+@when('I protect secret value "{value}"')
+def step_protect_secret_value(context, value):
+    context.last_protected_text = _privacy_filter(context).protect_secret(value)
+
+
+@when('I protect privacy text "{text}"')
+def step_protect_privacy_text(context, text):
+    context.last_protected_text = _privacy_filter(context).protect_privacy_text(text)
+
+
+@when("I protect the last protected privacy text again")
+def step_protect_last_privacy_text_again(context):
+    context.last_protected_text = _privacy_filter(context).protect_privacy_text(context.last_protected_text)
+
+
+@when("I restore the last protected privacy text")
+def step_restore_last_protected_privacy_text(context):
+    context.last_restored_text = _privacy_filter(context).restore_privacy_text(context.last_protected_text)
+
+
+@when('I restore privacy text "{text}"')
+def step_restore_privacy_text(context, text):
+    context.last_restored_text = _privacy_filter(context).restore_privacy_text(text)
+
+
+@when('I process inbound privacy text "{text}"')
+def step_process_inbound_privacy_text(context, text):
+    content = text.replace("{last_protected_text}", context.last_protected_text)
+    context.text_processing_result = _privacy_filter(context).process_inbound_privacy_text(content)
+
+
+@when('I process outbound privacy text "{text}"')
+def step_process_outbound_privacy_text(context, text):
+    context.text_processing_result = _privacy_filter(context).process_outbound_privacy_text(text)
+
+
+@when("I check the last protected privacy text")
+def step_check_last_protected_privacy_text(context):
+    _check_text(context, context.last_protected_text)
+
+
+@then("protected text contains a secret token")
+def step_protected_text_contains_secret_token(context):
+    assert context.last_protected_text is not None
+    assert "<secret:1:" in context.last_protected_text
+    assert context.last_protected_text.endswith(">")
+
+
+@then("protected text contains at least {count:d} secret tokens")
+def step_protected_text_contains_at_least_tokens(context, count):
+    assert context.last_protected_text is not None
+    assert context.last_protected_text.count("<secret:1:") >= count, context.last_protected_text
+
+
+@then("protected text contains exactly {count:d} secret token")
+def step_protected_text_contains_exactly_token(context, count):
+    assert context.last_protected_text is not None
+    assert context.last_protected_text.count("<secret:1:") == count, context.last_protected_text
+
+
+@then('protected text does not contain "{text}"')
+def step_protected_text_does_not_contain(context, text):
+    assert context.last_protected_text is not None
+    assert text not in context.last_protected_text, context.last_protected_text
+
+
+@then('restored privacy text is "{expected}"')
+def step_restored_privacy_text_is(context, expected):
+    assert context.last_restored_text == expected
