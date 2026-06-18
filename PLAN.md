@@ -7,7 +7,7 @@ adapter helpers, not a runnable server or framework binding.
 
 ## Scope
 
-- text/image encryption and decryption
+- text encryption/decryption and automatic sensitive image-region protection/restoration
 - sensitive phrase detection and filtering decisions
 - streaming detection helper
 - optional environment-derived defaults
@@ -23,7 +23,9 @@ Use `privacy_gateway` (top-level package exports) as the recommended public inte
 
 - `PrivacyGatewayFilter.encrypt_text`
 - `PrivacyGatewayFilter.decrypt_text`
-- `PrivacyGatewayFilter.encrypt_payload`
+- `PrivacyGatewayFilter.protect_image`
+- `PrivacyGatewayFilter.restore_image`
+- `PrivacyGatewayFilter.encrypt_payload` (`image` payloads protect detected regions only; there is no whole-image encryption workflow)
 - `PrivacyGatewayFilter.decrypt_payload`
 - `PrivacyGatewayFilter.restore_payload`
 - `PrivacyGatewayFilter.process_inbound_text`

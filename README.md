@@ -6,7 +6,7 @@
 - automatic restoration of `<secret:1:...>` tokens without special HTTP headers
 - prompt-injection phrase detection and decisioning
 - streaming detection helper
-- backward-compatible full text/image cryptographic primitives
+- automatic sensitive image-region protection and restoration
 
 It is intentionally not a gateway, HTTP server, or network service. JSON parsing,
 field selection, routing, proxying, and request/response rewriting belong in the
@@ -134,20 +134,51 @@ must:
 This prevents unsafe raw-string rewriting of JSON and lets gateway code decide
 which message/tool-call/AI-output fields are relevant.
 
-## Backward-compatible full-payload crypto
+## Image privacy APIs
 
-Existing whole-text/image APIs remain available for older callers and tests:
+Images are never protected by encrypting the whole image. The image API analyzes
+the image for sensitive OCR/PII bounding boxes, protects only those pixel regions,
+and leaves the rest of the image viewable.
+
+Preferred image APIs:
+
+- `protect_image(content, crypto_key)` -> detects sensitive regions in a base64 image and returns a base64 PNG with protected rectangles.
+- `restore_image(content, crypto_key)` -> restores protected rectangles from the region cache or embedded fallback metadata.
+
+Compatibility payload helpers also use this image behavior:
+
+- `encrypt_payload("image", content, crypto_key)` protects detected regions; it does not encrypt the full image.
+- `decrypt_payload("image", content, crypto_key)` restores protected regions.
+- `restore_payload("image", content, crypto_key)` is an alias for `decrypt_payload`.
+
+For each detected region, the service encrypts the full-quality crop and stores
+it in a process-local LRU cache keyed by the encrypted crop's SHA-256 hash. The
+cache keeps the newest 1000 region entries. The returned PNG embeds the region
+hash and an encrypted low-resolution fallback crop. Restore behavior is:
+
+1. hash cache hit -> restore the original full-quality region,
+2. cache miss -> decrypt the embedded low-resolution fallback and scale it back
+   into place.
+
+Image region detection uses `presidio-image-redactor`/OCR plus the same prepared
+Presidio analyzer configuration as text PII detection. If OCR/region detection
+fails, image protection fails closed with `ImageCryptoError` rather than silently
+returning an unprotected image. If detection succeeds and finds no sensitive
+regions, the original image base64 is returned unchanged.
+
+Deployments must provide the OCR runtime expected by `presidio-image-redactor`
+(for example Tesseract in container images) in addition to the prepared spaCy
+model.
+
+## Backward-compatible text crypto
+
+Existing whole-text APIs remain available for older callers and tests:
 
 - `encrypt_text(content, crypto_key=None)` -> `str`
 - `decrypt_text(content, crypto_key=None)` -> `str`
-- `encrypt_payload(type, content, crypto_key)`
-- `decrypt_payload(type, content, crypto_key)`
-- `restore_payload(type, content, crypto_key)`
-
-Supported payload types:
-
-- `text`
-- `image`
+- `encrypt_payload("text", content, crypto_key)`
+- `decrypt_payload("text", content, crypto_key)`
+- `restore_payload("text", content, crypto_key)`
 
 Text crypto requires AES key byte lengths `{16, 24, 32}`. New automatic privacy
 flows should prefer `<secret:1:...>` tokenization instead of whole-body payload

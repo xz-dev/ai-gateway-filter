@@ -7,12 +7,38 @@ Feature: Privacy gateway library primitives
     When I decrypt the payload with key "WmZq4t7w!z%C&F)J"
     Then the restored text is "My name is James Bond"
 
-  Scenario: Encrypt and decrypt image base64 payload preserves content
-    Given a payload of type "image", content "iVBORw0KGgo=", and key "image-secret-key"
+  Scenario: Image payload protection automatically protects detected pixels
+    Given a sample image payload and key "image-secret-key"
+    And an image detector returns region 1,1,3,3
+    When I encrypt the payload
+    Then the protected image differs from the original image
+    And the protected image contains partial image metadata
+    When I decrypt the payload with key "image-secret-key"
+    Then the restored image pixels match the original image
+
+  Scenario: Image payload protection leaves images unchanged when nothing sensitive is detected
+    Given a sample image payload and key "image-secret-key"
+    And an image detector returns no regions
     When I encrypt the payload
     Then the operation succeeds
-    When I decrypt the payload with key "image-secret-key"
-    Then the restored text is "iVBORw0KGgo="
+    And the protected image is unchanged
+
+  Scenario: Image payload protection fails closed when region detection fails
+    Given a sample image payload and key "image-secret-key"
+    And an image detector fails
+    When I encrypt the payload
+    Then an error is raised with detail "image PII region detection failed"
+
+  Scenario: Partial image region decryption falls back after cache eviction
+    Given a sample image payload and key "image-secret-key"
+    And an image detector returns region 1,1,3,3
+    When I encrypt the payload with an isolated image cache
+    And I decrypt the protected image with a fresh isolated cache
+    Then the restored image size matches the original image
+
+  Scenario: Image region cache keeps only the newest 1000 region entries
+    When I fill the image region cache with 1001 entries
+    Then image region cache size is 1000
 
   Scenario: Invalid text key is rejected on encrypt
     Given a payload of type "text", content "My name is James Bond", and key "short"
@@ -31,8 +57,9 @@ Feature: Privacy gateway library primitives
     When I encrypt the payload
     Then an error is raised with detail "content must be a valid base64 image string"
 
-  Scenario: Wrong image key cannot decrypt
-    Given a payload of type "image", content "iVBORw0KGgo=", and key "image-secret-key"
+  Scenario: Wrong image key cannot decrypt a partial image region
+    Given a sample image payload and key "image-secret-key"
+    And an image detector returns region 1,1,3,3
     When I encrypt the payload
     Then the operation succeeds
     When I decrypt the payload with key "wrong-image-key"

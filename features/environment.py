@@ -20,3 +20,5 @@ def before_scenario(context, scenario):  # noqa: ARG001
     context.text_processing_result = None
     context.settings = None
     context.http_block_error = None
+    context.original_image = None
+    context.image_crypto_service = None

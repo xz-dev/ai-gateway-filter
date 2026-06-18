@@ -148,6 +148,12 @@ class PiiDetectionService:
         self._token_service = token_service or SecretTokenService()
         self._analyzer = analyzer if analyzer is not None else self._build_analyzer(spacy_model, require_spacy_model)
 
+    @property
+    def presidio_analyzer(self) -> object | None:
+        """Return the prepared Presidio analyzer, or ``None`` when regex-only fallback is active."""
+
+        return self._analyzer
+
     @staticmethod
     def _build_analyzer(spacy_model: str | None, require_spacy_model: bool) -> object | None:
         try:

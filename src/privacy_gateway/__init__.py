@@ -3,7 +3,7 @@
 The package intentionally exposes only gateway-agnostic core primitives for:
 - recognition/detection of sensitive phrases
 - block decision handling
-- text/image crypto encrypt/decrypt primitives
+- text crypto primitives and automatic sensitive image-region protection
 - reversible natural-language PII tokenization with ``<secret:1:...>`` tokens
 """
 

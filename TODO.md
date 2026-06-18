@@ -9,6 +9,7 @@ Implemented in the core library and synchronized with `apisix-plugin-example`:
 - [x] `process_outbound_text` check-and-encrypt helper
 - [x] Environment-backed `PrivacyGatewaySettings.crypto_key`
 - [x] Framework-free `privacy_gateway.adapters.http` helpers
+- [x] Automatic image-region protection with OCR-detected boxes, hash cache restoration, and low-resolution fallback
 
 ## Library API improvements discovered while wiring `apisix-plugin-example`
 
@@ -92,3 +93,11 @@ Implemented in the core library and synchronized with `apisix-plugin-example`:
   ```
 
   These helpers should return plain dictionaries/dataclasses and avoid importing FastAPI, Flask, APISIX, or any networking framework.
+
+## Image privacy refactor decision
+
+- **Decision:** The library should not expose a whole-image encryption workflow. Image privacy means detecting sensitive image/OCR regions and protecting only those rectangles.
+- **Current behavior:** `protect_image(...)` and `encrypt_payload("image", ...)` run image-region detection, redact only detected boxes, and embed restoration metadata. `restore_image(...)` / `decrypt_payload("image", ...)` restore boxes by hash-cache hit or encrypted low-resolution fallback.
+- **Cache contract:** Full-quality encrypted crops are keyed by SHA-256 hash in a process-local LRU cache with a max size of 1000. Cache miss falls back to the low-resolution encrypted crop stored in PNG metadata.
+- **Failure policy:** Detection failures fail closed with `ImageCryptoError`; successful detection with no regions returns the original image unchanged.
+- **Runtime requirement:** `presidio-image-redactor` is now a dependency, and deployments need the OCR runtime expected by that package (Tesseract in the example containers).

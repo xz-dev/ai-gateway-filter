@@ -86,10 +86,12 @@ example-password-change-me
 Use your own high-entropy `PRIVACY_GATEWAY_PASSWORD` in real deployments. Tokens
 are returned to clients, so weak copied passwords are unsafe.
 
-## spaCy model preparation
+## spaCy model and OCR preparation
 
-Privacy detection uses Presidio Analyzer backed by spaCy. The runtime containers
-prepare `en_core_web_sm` during image build:
+Privacy detection uses Presidio Analyzer backed by spaCy. Image-region detection
+uses `presidio-image-redactor` OCR to find sensitive text bounding boxes before
+protecting only those pixels. The runtime containers install Tesseract/OpenCV
+runtime libraries and prepare `en_core_web_sm` during image build:
 
 ```dockerfile
 RUN python -m spacy download en_core_web_sm
@@ -103,7 +105,8 @@ PRIVACY_GATEWAY_SPACY_MODEL: en_core_web_sm
 ```
 
 This means startup fails loudly if the model is missing rather than downloading
-models implicitly at request time.
+models implicitly at request time. If Tesseract/OCR is unavailable at runtime,
+image protection fails closed instead of silently returning an unprotected image.
 
 ## Run the stack
 

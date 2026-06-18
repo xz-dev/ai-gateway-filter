@@ -22,7 +22,7 @@ from privacy_gateway.errors import (
     TextCryptoKeyError,
     UnsupportedPayloadTypeError,
 )
-from privacy_gateway.services.image_crypto import ImageCryptoService
+from privacy_gateway.services.image_crypto import ImageCryptoService, ImageRegionDetector
 from privacy_gateway.services.pii_detection import PiiDetectionService, PiiSpan
 from privacy_gateway.services.presidio_crypto import TextCryptoService
 from privacy_gateway.services.privacy_text import TextPrivacyService
@@ -138,6 +138,7 @@ class PrivacyGatewayFilter:
         secret_token_version: str = DEFAULT_SECRET_TOKEN_VERSION,
         spacy_model: str = DEFAULT_SPACY_MODEL,
         require_spacy_model: bool = DEFAULT_REQUIRE_SPACY_MODEL,
+        image_region_detector: ImageRegionDetector | None = None,
     ) -> None:
         sanitized_phrases = _sanitize_sensitive_phrases(sensitive_phrases)
         self._sensitive_phrases = (
@@ -149,21 +150,28 @@ class PrivacyGatewayFilter:
         self._crypto_key = crypto_key
         self._privacy_password = privacy_password or crypto_key
         self._text_crypto = TextCryptoService()
-        self._image_crypto = ImageCryptoService()
         self._sensitive = SensitiveWordService(self._sensitive_phrases)
         self._secret_tokens = SecretTokenService(
             crypto=self._text_crypto,
             label=secret_token_label,
             version=secret_token_version,
         )
+        pii_detector = PiiDetectionService(
+            entities=pii_entities or DEFAULT_PII_ENTITIES,
+            token_service=self._secret_tokens,
+            spacy_model=spacy_model,
+            require_spacy_model=require_spacy_model,
+        )
         self._privacy_text = TextPrivacyService(
             token_service=self._secret_tokens,
-            detector=PiiDetectionService(
-                entities=pii_entities or DEFAULT_PII_ENTITIES,
-                token_service=self._secret_tokens,
-                spacy_model=spacy_model,
-                require_spacy_model=require_spacy_model,
-            ),
+            detector=pii_detector,
+        )
+        self._image_crypto = ImageCryptoService(
+            detector=image_region_detector,
+            text_analyzer=pii_detector.presidio_analyzer,
+            spacy_model=spacy_model,
+            require_spacy_model=require_spacy_model,
+            entities=pii_entities or DEFAULT_PII_ENTITIES,
         )
 
     @classmethod
@@ -212,7 +220,7 @@ class PrivacyGatewayFilter:
         return self._text_crypto.decrypt(content, self._resolve_crypto_key(crypto_key))
 
     def encrypt_payload(self, payload_type: str, content: str, crypto_key: str) -> CryptoOperationResult:
-        """Encrypt text/image content and return an opaque payload result."""
+        """Encrypt text or automatically protect detected sensitive image regions."""
 
         if payload_type == "text":
             content = self.encrypt_text(content, crypto_key)
@@ -224,12 +232,12 @@ class PrivacyGatewayFilter:
         return CryptoOperationResult(type=payload_type, content=content, crypto_key=crypto_key)
 
     def decrypt_payload(self, payload_type: str, content: str, crypto_key: str) -> CryptoOperationResult:
-        """Restore encrypted content and return an opaque payload result."""
+        """Restore encrypted text or partially protected image content."""
 
         if payload_type == "text":
             content = self.decrypt_text(content, crypto_key)
         elif payload_type == "image":
-            content = self._image_crypto.decrypt(content, crypto_key)
+            content = self.restore_image(content, crypto_key)
         else:
             raise UnsupportedPayloadTypeError(_UNSUPPORTED_PAYLOAD_MESSAGE)
 
@@ -239,6 +247,21 @@ class PrivacyGatewayFilter:
         """Alias for ``decrypt_payload`` for restoration-first call sites."""
 
         return self.decrypt_payload(payload_type, content, crypto_key)
+
+    def protect_image(self, content: str, crypto_key: str) -> str:
+        """Automatically detect and protect sensitive regions in a base64 image."""
+
+        return self._image_crypto.encrypt(content, crypto_key)
+
+    def restore_image(self, content: str, crypto_key: str) -> str:
+        """Restore partially protected image regions by hash cache or fallback metadata."""
+
+        return self._image_crypto.decrypt_regions(content, crypto_key)
+
+    def image_region_cache_size(self) -> int:
+        """Return the number of full-quality encrypted image regions in the LRU cache."""
+
+        return self._image_crypto.cache_size()
 
     def process_inbound_text(
         self,

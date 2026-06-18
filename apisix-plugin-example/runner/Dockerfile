@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/opt/apisix-python-plugin-runner
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git ca-certificates tesseract-ocr libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch master https://github.com/apache/apisix-python-plugin-runner.git /opt/apisix-python-plugin-runner

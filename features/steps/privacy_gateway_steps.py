@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from behave import given, then, when
 from dataclasses import dataclass
+import base64
+import io
 import re
 
 import privacy_gateway.config as config_module
+from PIL import Image
+
 from privacy_gateway import (
     ImageCryptoError,
     PrivacyGatewayError,
@@ -18,6 +22,20 @@ from privacy_gateway import (
 )
 from privacy_gateway.adapters.http import build_block_error, is_encrypted_request
 from privacy_gateway.config import get_settings
+from privacy_gateway.services.image_crypto import IMAGE_REGION_METADATA_KEY, ImageCryptoService, ImageRegion, _RegionCryptoCache
+
+
+class StaticImageRegionDetector:
+    def __init__(self, regions):
+        self._regions = regions
+
+    def detect(self, image):  # noqa: ARG002
+        return list(self._regions)
+
+
+class FailingImageRegionDetector:
+    def detect(self, image):  # noqa: ARG002
+        raise RuntimeError("detector unavailable")
 
 
 gateway = PrivacyGatewayFilter()
@@ -53,12 +71,35 @@ def step_given_payload(context, payload_type, content, crypto_key):
     context.crypto_key = crypto_key
 
 
+@given('a sample image payload and key "{crypto_key}"')
+def step_sample_image_payload(context, crypto_key):
+    image = Image.new("RGB", (4, 4), "white")
+    pixels = image.load()
+    for x in range(1, 3):
+        for y in range(1, 3):
+            pixels[x, y] = (255, 0, 0)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    context.payload_type = "image"
+    context.content = base64.b64encode(output.getvalue()).decode("ascii")
+    context.crypto_key = crypto_key
+    context.original_image = image.convert("RGBA")
+
+
+def _target_filter(context) -> PrivacyGatewayFilter:
+    return getattr(context, "gateway_with_phrases", gateway)
+
+
+def _last_content(context) -> str:
+    return context.last_result.content if hasattr(context.last_result, "content") else context.last_result
+
+
 @when("I encrypt the payload")
 def step_encrypt_payload(context):
     try:
         _set_success(
             context,
-            gateway.encrypt_payload(context.payload_type, context.content, context.crypto_key),
+            _target_filter(context).encrypt_payload(context.payload_type, context.content, context.crypto_key),
         )
     except Exception as exc:  # noqa: BLE001
         _set_error(context, exc)
@@ -67,12 +108,102 @@ def step_encrypt_payload(context):
 @when('I decrypt the payload with key "{crypto_key}"')
 def step_decrypt_with_key(context, crypto_key):
     try:
+        payload_type = context.last_result.type if hasattr(context.last_result, "type") else context.payload_type
         _set_success(
             context,
-            gateway.decrypt_payload(context.last_result.type, context.last_result.content, crypto_key),
+            _target_filter(context).decrypt_payload(payload_type, _last_content(context), crypto_key),
         )
     except Exception as exc:  # noqa: BLE001
         _set_error(context, exc)
+
+
+@given('an image detector returns region {left:d},{top:d},{right:d},{bottom:d}')
+def step_image_detector_returns_region(context, left, top, right, bottom):
+    detector = StaticImageRegionDetector([ImageRegion(left, top, right, bottom)])
+    context.gateway_with_phrases = PrivacyGatewayFilter(image_region_detector=detector)
+
+
+@given("an image detector returns no regions")
+def step_image_detector_returns_no_regions(context):
+    context.gateway_with_phrases = PrivacyGatewayFilter(image_region_detector=StaticImageRegionDetector([]))
+
+
+@given("an image detector fails")
+def step_image_detector_fails(context):
+    context.gateway_with_phrases = PrivacyGatewayFilter(image_region_detector=FailingImageRegionDetector())
+
+
+@when("I encrypt the payload with an isolated image cache")
+def step_encrypt_payload_isolated_image_cache(context):
+    detector = context.gateway_with_phrases._image_crypto._get_detector()  # noqa: SLF001 - test detector preservation
+    isolated = PrivacyGatewayFilter(image_region_detector=detector)
+    isolated._image_crypto = ImageCryptoService(  # noqa: SLF001 - test cache isolation
+        detector=detector,
+        cache=_RegionCryptoCache(),
+    )
+    try:
+        _set_success(context, isolated.encrypt_payload(context.payload_type, context.content, context.crypto_key).content)
+    except Exception as exc:  # noqa: BLE001
+        _set_error(context, exc)
+
+
+@when("I decrypt the protected image with a fresh isolated cache")
+def step_decrypt_image_regions_fresh_cache(context):
+    fresh = PrivacyGatewayFilter(image_region_detector=StaticImageRegionDetector([]))
+    fresh._image_crypto = ImageCryptoService(  # noqa: SLF001 - test cache isolation
+        detector=StaticImageRegionDetector([]),
+        cache=_RegionCryptoCache(),
+    )
+    try:
+        _set_success(context, fresh.restore_image(context.last_result, context.crypto_key))
+    except Exception as exc:  # noqa: BLE001
+        _set_error(context, exc)
+
+
+@then("the protected image differs from the original image")
+def step_protected_image_differs(context):
+    assert context.last_error is None, f"expected success, got {context.last_error!r}"
+    protected = Image.open(io.BytesIO(base64.b64decode(_last_content(context)))).convert("RGBA")
+    assert list(protected.getdata()) != list(context.original_image.getdata())
+
+
+@then("the protected image contains partial image metadata")
+def step_protected_image_metadata(context):
+    protected = Image.open(io.BytesIO(base64.b64decode(_last_content(context))))
+    assert IMAGE_REGION_METADATA_KEY in protected.info
+
+
+@then("the restored image pixels match the original image")
+def step_restored_image_pixels(context):
+    assert context.last_error is None, f"expected success, got {context.last_error!r}"
+    restored = Image.open(io.BytesIO(base64.b64decode(_last_content(context)))).convert("RGBA")
+    assert list(restored.getdata()) == list(context.original_image.getdata())
+
+
+@then("the restored image size matches the original image")
+def step_restored_image_size(context):
+    assert context.last_error is None, f"expected success, got {context.last_error!r}"
+    restored = Image.open(io.BytesIO(base64.b64decode(_last_content(context)))).convert("RGBA")
+    assert restored.size == context.original_image.size
+
+
+@then("the protected image is unchanged")
+def step_protected_image_unchanged(context):
+    assert context.last_error is None, f"expected success, got {context.last_error!r}"
+    assert _last_content(context) == context.content
+
+
+@when("I fill the image region cache with 1001 entries")
+def step_fill_image_region_cache(context):
+    service = ImageCryptoService()
+    for index in range(1001):
+        service._cache.put(f"hash-{index}", f"encrypted-{index}".encode("ascii"))  # noqa: SLF001 - direct cache contract
+    context.image_crypto_service = service
+
+
+@then("image region cache size is 1000")
+def step_image_region_cache_size(context):
+    assert context.image_crypto_service.cache_size() == 1000
 
 
 @then('an error is raised with detail "{detail}"')
