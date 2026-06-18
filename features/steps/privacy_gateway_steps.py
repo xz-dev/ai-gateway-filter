@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from behave import given, then, when
 from dataclasses import dataclass
+import re
 
 import privacy_gateway.config as config_module
 from privacy_gateway import (
@@ -392,6 +393,16 @@ def step_configure_privacy_filter(context, password):
     context.privacy_password = password
     context.last_protected_text = None
     context.last_restored_text = None
+    context.first_protected_text = None
+    context.second_protected_text = None
+
+
+@when("I configure a privacy filter without password")
+def step_configure_privacy_filter_without_password(context):
+    context.gateway_with_phrases = PrivacyGatewayFilter(privacy_password=None, crypto_key=None)
+    context.privacy_password = None
+    context.last_protected_text = None
+    context.last_restored_text = None
 
 
 def _privacy_filter(context) -> PrivacyGatewayFilter:
@@ -401,6 +412,21 @@ def _privacy_filter(context) -> PrivacyGatewayFilter:
 @when('I protect secret value "{value}"')
 def step_protect_secret_value(context, value):
     context.last_protected_text = _privacy_filter(context).protect_secret(value)
+
+
+@when('I attempt to protect secret value "{value}"')
+def step_attempt_protect_secret_value(context, value):
+    try:
+        _set_success(context, _privacy_filter(context).protect_secret(value))
+    except Exception as exc:  # noqa: BLE001 - behavior tests assert normalized public error text
+        _set_error(context, exc)
+
+
+@when('I protect secret value "{value}" twice')
+def step_protect_secret_value_twice(context, value):
+    context.first_protected_text = _privacy_filter(context).protect_secret(value)
+    context.second_protected_text = _privacy_filter(context).protect_secret(value)
+    context.last_protected_text = context.second_protected_text
 
 
 @when('I protect privacy text "{text}"')
@@ -429,6 +455,38 @@ def step_process_inbound_privacy_text(context, text):
     context.text_processing_result = _privacy_filter(context).process_inbound_privacy_text(content)
 
 
+@when('I process the last protected privacy text with password "{password}"')
+def step_process_last_protected_privacy_text_with_password(context, password):
+    context.text_processing_result = _privacy_filter(context).process_inbound_privacy_text(
+        context.last_protected_text,
+        privacy_password=password,
+    )
+
+
+@when("I tamper with the last protected privacy text")
+def step_tamper_last_protected_privacy_text(context):
+    token = context.last_protected_text
+    assert token is not None and token.endswith(">")
+    body_end = token.rfind(">")
+    replacement = "A" if token[body_end - 1] != "A" else "B"
+    context.last_protected_text = f"{token[: body_end - 1]}{replacement}{token[body_end:]}"
+
+
+@when('I create a privacy filter requiring spaCy model "{model_name}"')
+def step_create_filter_requiring_missing_spacy_model(context, model_name):
+    try:
+        _set_success(
+            context,
+            PrivacyGatewayFilter(
+                privacy_password="gateway-password",
+                spacy_model=model_name,
+                require_spacy_model=True,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - behavior tests assert public startup error text
+        _set_error(context, exc)
+
+
 @when('I process outbound privacy text "{text}"')
 def step_process_outbound_privacy_text(context, text):
     context.text_processing_result = _privacy_filter(context).process_outbound_privacy_text(text)
@@ -444,6 +502,22 @@ def step_protected_text_contains_secret_token(context):
     assert context.last_protected_text is not None
     assert "<secret:1:" in context.last_protected_text
     assert context.last_protected_text.endswith(">")
+
+
+@then("protected text matches the secret token salt ciphertext format")
+def step_protected_text_matches_secret_token_format(context):
+    pattern = re.compile(r"^<secret:1:[A-Za-z0-9_\-=]+\.[A-Za-z0-9_\-=]+>$")
+    assert context.first_protected_text is not None
+    assert context.second_protected_text is not None
+    assert pattern.fullmatch(context.first_protected_text), context.first_protected_text
+    assert pattern.fullmatch(context.second_protected_text), context.second_protected_text
+
+
+@then("the two protected privacy texts differ")
+def step_two_protected_privacy_texts_differ(context):
+    assert context.first_protected_text is not None
+    assert context.second_protected_text is not None
+    assert context.first_protected_text != context.second_protected_text
 
 
 @then("protected text contains at least {count:d} secret tokens")
@@ -467,3 +541,9 @@ def step_protected_text_does_not_contain(context, text):
 @then('restored privacy text is "{expected}"')
 def step_restored_privacy_text_is(context, expected):
     assert context.last_restored_text == expected
+
+
+@then('both protected privacy texts restore to "{expected}"')
+def step_both_protected_privacy_texts_restore_to(context, expected):
+    assert _privacy_filter(context).restore_privacy_text(context.first_protected_text) == expected
+    assert _privacy_filter(context).restore_privacy_text(context.second_protected_text) == expected

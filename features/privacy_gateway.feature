@@ -202,3 +202,34 @@ Feature: Privacy gateway library primitives
     When I configure a privacy filter with password "gateway-password"
     And I restore privacy text "hello <secret:1:example>"
     Then restored privacy text is "hello <secret:1:example>"
+
+  Scenario: Secret tokens use randomized salt while remaining restorable
+    When I configure a privacy filter with password "gateway-password"
+    And I protect secret value "张三" twice
+    Then the two protected privacy texts differ
+    And protected text matches the secret token salt ciphertext format
+    And both protected privacy texts restore to "张三"
+
+  Scenario: Secret token restoration with the wrong password is normalized
+    When I configure a privacy filter with password "gateway-password"
+    And I protect secret value "张三"
+    And I process the last protected privacy text with password "wrong-password"
+    Then text processing error code is "secret_token_decryption_failed"
+    And text processing content is empty
+
+  Scenario: Tampered secret tokens fail closed
+    When I configure a privacy filter with password "gateway-password"
+    And I protect secret value "张三"
+    And I tamper with the last protected privacy text
+    And I process the last protected privacy text with password "gateway-password"
+    Then text processing error code is "secret_token_decryption_failed"
+    And text processing content is empty
+
+  Scenario: Missing privacy password fails secret protection
+    When I configure a privacy filter without password
+    And I attempt to protect secret value "张三"
+    Then an error is raised with detail "privacy password is required"
+
+  Scenario: Missing required spaCy model fails fast
+    When I create a privacy filter requiring spaCy model "missing_model_for_privacy_gateway_test"
+    Then an error is raised with detail "spaCy model 'missing_model_for_privacy_gateway_test' is required but not installed; run `python scripts/prepare_spacy_model.py missing_model_for_privacy_gateway_test` before starting the gateway"
