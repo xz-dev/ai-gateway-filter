@@ -451,8 +451,10 @@ def step_restore_privacy_text(context, text):
 
 @when('I process inbound privacy text "{text}"')
 def step_process_inbound_privacy_text(context, text):
-    content = text.replace("{last_protected_text}", context.last_protected_text)
-    context.text_processing_result = _privacy_filter(context).process_inbound_privacy_text(content)
+    if "{last_protected_text}" in text:
+        assert context.last_protected_text is not None
+        text = text.replace("{last_protected_text}", context.last_protected_text)
+    context.text_processing_result = _privacy_filter(context).process_inbound_privacy_text(text)
 
 
 @when('I process the last protected privacy text with password "{password}"')
