@@ -1,0 +1,5 @@
+socket:
+  file: $env.APISIX_LISTEN_ADDRESS
+
+logging:
+  level: info

@@ -1,0 +1,31 @@
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+  enable_admin: true
+
+nginx_config:
+  envs:
+    - APISIX_LISTEN_ADDRESS
+
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  admin:
+    allow_admin:
+      - 0.0.0.0/0
+    admin_listen:
+      ip: 0.0.0.0
+      port: 9180
+    admin_key:
+      - name: admin
+        key: privacy-gateway-admin-key
+        role: admin
+  etcd:
+    host:
+      - http://etcd:2379
+    prefix: /apisix
+    timeout: 30
+
+ext-plugin:
+  path_for_test: /var/run/apisix-python-runner/runner.sock
