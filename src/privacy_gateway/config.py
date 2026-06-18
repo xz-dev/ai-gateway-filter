@@ -23,6 +23,7 @@ class PrivacyGatewaySettings:
 
     sensitive_phrases: list[str]
     max_sensitive_stream_window: int = DEFAULT_MAX_STREAM_WINDOW
+    crypto_key: str | None = None
 
     @property
     def prompt_injection_phrases(self) -> list[str]:
@@ -53,12 +54,14 @@ def get_settings() -> PrivacyGatewaySettings:
     Supports:
     - PRIVACY_GATEWAY_SENSITIVE_PHRASES: comma-separated phrase list
     - PRIVACY_GATEWAY_MAX_SENSITIVE_STREAM_WINDOW: positive integer window size
+    - PRIVACY_GATEWAY_CRYPTO_KEY: optional default text crypto key
     """
 
     raw_phrases = getenv(
         "PRIVACY_GATEWAY_SENSITIVE_PHRASES", ",".join(DEFAULT_PROMPT_INJECTION_PHRASES)
     )
     raw_window = getenv("PRIVACY_GATEWAY_MAX_SENSITIVE_STREAM_WINDOW", str(DEFAULT_MAX_STREAM_WINDOW))
+    raw_crypto_key = getenv("PRIVACY_GATEWAY_CRYPTO_KEY")
 
     sensitive_phrases = _parse_sensitive_phrases(raw_phrases)
     if not sensitive_phrases:
@@ -67,4 +70,5 @@ def get_settings() -> PrivacyGatewaySettings:
     return PrivacyGatewaySettings(
         sensitive_phrases=sensitive_phrases,
         max_sensitive_stream_window=_parse_stream_window(raw_window),
+        crypto_key=raw_crypto_key if raw_crypto_key else None,
     )

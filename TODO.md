@@ -1,5 +1,15 @@
 # TODO
 
+## Implementation status
+
+Implemented in the core library and synchronized with `apisix-plugin-example`:
+
+- [x] Key-hiding `encrypt_text` / `decrypt_text` APIs
+- [x] `process_inbound_text` decrypt-and-check helper
+- [x] `process_outbound_text` check-and-encrypt helper
+- [x] Environment-backed `PrivacyGatewaySettings.crypto_key`
+- [x] Framework-free `privacy_gateway.adapters.http` helpers
+
 ## Library API improvements discovered while wiring `apisix-plugin-example`
 
 ### 1. Add a proxy-oriented text crypto API that does not echo the key

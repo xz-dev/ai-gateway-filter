@@ -8,6 +8,7 @@ from apisix.runner.http.request import Request
 from apisix.runner.http.response import Response
 from apisix.runner.plugin.core import PluginBase
 from privacy_gateway import PrivacyGatewayFilter
+from privacy_gateway.adapters.http import DEFAULT_ENCRYPTED_HEADER, build_block_error, get_header, is_truthy_header
 from privacy_gateway.config import get_settings
 
 _DEFAULT_FILTER = PrivacyGatewayFilter.from_settings(get_settings())
@@ -16,30 +17,9 @@ _DEFAULT_INSPECT_CONTENT_TYPES = (
     "application/json",
     "application/x-www-form-urlencoded",
 )
-_TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
-def _header(headers: dict[str, str], name: str) -> str:
-    wanted = name.casefold()
-    for key, value in headers.items():
-        if key.casefold() == wanted:
-            return value or ""
-    return ""
-
-
-def _is_truthy(value: str) -> bool:
-    return value.strip().casefold() in _TRUE_VALUES
-
-
-def _json_body(status: int, message: str, *, matched: str | None = None) -> str:
-    payload: dict[str, Any] = {
-        "error": "privacy_gateway_blocked",
-        "message": message,
-        "status": status,
-        "blocked_by": "apisix-python-runner:privacy-gateway-guard",
-    }
-    if matched:
-        payload["matched"] = matched
+def _json_body(payload: dict[str, object]) -> str:
     return json.dumps(payload, separators=(",", ":"))
 
 
@@ -74,11 +54,11 @@ def _parse_conf(conf: Any) -> dict[str, Any]:
 
 
 def _should_inspect(headers: dict[str, str], conf: dict[str, Any]) -> bool:
-    encrypted_header = str(conf.get("skip_when_encrypted_header", "X-Privacy-Encrypted"))
-    if _is_truthy(_header(headers, encrypted_header)):
+    encrypted_header = str(conf.get("skip_when_encrypted_header", DEFAULT_ENCRYPTED_HEADER))
+    if is_truthy_header(get_header(headers, encrypted_header)):
         return False
 
-    content_type = _header(headers, "content-type").split(";", 1)[0].strip().casefold()
+    content_type = (get_header(headers, "content-type") or "").split(";", 1)[0].strip().casefold()
     if not content_type:
         # If the client sends a body without Content-Type, assume text for safety.
         return True
@@ -127,7 +107,13 @@ class PrivacyGatewayGuard(PluginBase):
         status = int(conf.get("block_status", 422))
         message = str(conf.get("block_message", "request blocked by privacy gateway guard"))
         matched = decision.match.detected_word if decision.match else None
-        response.set_status_code(status)
+        error = build_block_error(
+            status,
+            message,
+            blocked_by="apisix-python-runner:privacy-gateway-guard",
+            matched=matched,
+        )
+        response.set_status_code(error.status)
         response.set_header("Content-Type", "application/json")
         response.set_header("X-Privacy-Guard", "blocked")
-        response.set_body(_json_body(status, message, matched=matched))
+        response.set_body(_json_body(error.body))

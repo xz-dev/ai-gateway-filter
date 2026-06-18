@@ -61,6 +61,28 @@ class FilterDecision:
         return cls(blocked=True, match=match)
 
 
+@dataclass(frozen=True)
+class TextProcessingError:
+    """Normalized text-processing error details for gateway integrations."""
+
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class TextProcessingResult:
+    """Result returned by inbound/outbound text processing helpers.
+
+    ``content`` contains the transformed text only for successful, non-blocked
+    processing. ``error`` intentionally contains only normalized details and
+    never stores the crypto key used for the operation.
+    """
+
+    content: str
+    decision: FilterDecision
+    error: TextProcessingError | None = None
+
+
 class SensitiveTextStreamDetector:
     """Stateful streaming detector for text content."""
 
@@ -97,6 +119,7 @@ class PrivacyGatewayFilter:
         *,
         sensitive_phrases: Sequence[str] | None = None,
         max_sensitive_stream_window: int = 4096,
+        crypto_key: str | None = None,
     ) -> None:
         sanitized_phrases = _sanitize_sensitive_phrases(sensitive_phrases)
         self._sensitive_phrases = (
@@ -105,6 +128,7 @@ class PrivacyGatewayFilter:
             else sanitized_phrases
         )
         self._max_sensitive_stream_window = max(int(max_sensitive_stream_window), 1)
+        self._crypto_key = crypto_key
         self._text_crypto = TextCryptoService()
         self._image_crypto = ImageCryptoService()
         self._sensitive = SensitiveWordService(self._sensitive_phrases)
@@ -119,13 +143,31 @@ class PrivacyGatewayFilter:
         return cls(
             sensitive_phrases=settings.prompt_injection_phrases,
             max_sensitive_stream_window=settings.max_sensitive_stream_window,
+            crypto_key=getattr(settings, "crypto_key", None),
         )
+
+    def _resolve_crypto_key(self, crypto_key: str | None) -> str:
+        if crypto_key is not None:
+            return crypto_key
+        if self._crypto_key is not None:
+            return self._crypto_key
+        raise TextCryptoKeyError("crypto_key is required")
+
+    def encrypt_text(self, content: str, crypto_key: str | None = None) -> str:
+        """Encrypt text without returning or storing the crypto key in a result object."""
+
+        return self._text_crypto.encrypt(content, self._resolve_crypto_key(crypto_key))
+
+    def decrypt_text(self, content: str, crypto_key: str | None = None) -> str:
+        """Decrypt text without returning or storing the crypto key in a result object."""
+
+        return self._text_crypto.decrypt(content, self._resolve_crypto_key(crypto_key))
 
     def encrypt_payload(self, payload_type: str, content: str, crypto_key: str) -> CryptoOperationResult:
         """Encrypt text/image content and return an opaque payload result."""
 
         if payload_type == "text":
-            content = self._text_crypto.encrypt(content, crypto_key)
+            content = self.encrypt_text(content, crypto_key)
         elif payload_type == "image":
             content = self._image_crypto.encrypt(content, crypto_key)
         else:
@@ -137,7 +179,7 @@ class PrivacyGatewayFilter:
         """Restore encrypted content and return an opaque payload result."""
 
         if payload_type == "text":
-            content = self._text_crypto.decrypt(content, crypto_key)
+            content = self.decrypt_text(content, crypto_key)
         elif payload_type == "image":
             content = self._image_crypto.decrypt(content, crypto_key)
         else:
@@ -149,6 +191,55 @@ class PrivacyGatewayFilter:
         """Alias for ``decrypt_payload`` for restoration-first call sites."""
 
         return self.decrypt_payload(payload_type, content, crypto_key)
+
+    def process_inbound_text(
+        self,
+        content: str,
+        *,
+        crypto_key: str | None = None,
+        encrypted: bool = False,
+    ) -> TextProcessingResult:
+        """Decrypt encrypted inbound text when requested, then check it for blocking phrases."""
+
+        try:
+            plaintext = self.decrypt_text(content, crypto_key) if encrypted and content else content
+        except TextCryptoError as exc:
+            return TextProcessingResult(
+                content="",
+                decision=FilterDecision.allow(),
+                error=TextProcessingError(code="text_decryption_failed", message=str(exc)),
+            )
+
+        decision = self.check_text(plaintext)
+        return TextProcessingResult(content=plaintext if not decision.blocked else "", decision=decision)
+
+    def process_outbound_text(
+        self,
+        content: str,
+        *,
+        crypto_key: str | None = None,
+        encrypt: bool = True,
+    ) -> TextProcessingResult:
+        """Check upstream text for blocking phrases, then encrypt successful output when requested."""
+
+        decision = self.check_text(content)
+        if decision.blocked:
+            return TextProcessingResult(content="", decision=decision)
+
+        if not encrypt or not content:
+            return TextProcessingResult(content=content, decision=decision)
+
+        try:
+            return TextProcessingResult(
+                content=self.encrypt_text(content, crypto_key),
+                decision=decision,
+            )
+        except TextCryptoError as exc:
+            return TextProcessingResult(
+                content="",
+                decision=decision,
+                error=TextProcessingError(code="text_encryption_failed", message=str(exc)),
+            )
 
     def check_text(self, text: str) -> FilterDecision:
         """Evaluate non-stream text and return a filter decision."""
@@ -177,6 +268,8 @@ __all__ = [
     "PrivacyGatewayFilter",
     "SensitiveMatch",
     "SensitiveTextStreamDetector",
+    "TextProcessingError",
+    "TextProcessingResult",
     "UnsupportedPayloadTypeError",
     "TextCryptoError",
     "TextCryptoKeyError",

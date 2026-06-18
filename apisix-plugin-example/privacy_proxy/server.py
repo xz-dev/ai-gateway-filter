@@ -9,11 +9,13 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from privacy_gateway import PrivacyGatewayError, PrivacyGatewayFilter
+from privacy_gateway import PrivacyGatewayFilter
+from privacy_gateway.adapters.http import DEFAULT_ENCRYPTED_HEADER, build_block_error, is_encrypted_request
 from privacy_gateway.config import get_settings
 
-FILTER = PrivacyGatewayFilter.from_settings(get_settings())
-CRYPTO_KEY = os.environ.get("PRIVACY_GATEWAY_CRYPTO_KEY", "WmZq4t7w!z%C&F)J")
+SETTINGS = get_settings()
+FILTER = PrivacyGatewayFilter.from_settings(SETTINGS)
+CRYPTO_KEY = SETTINGS.crypto_key or "WmZq4t7w!z%C&F)J"
 UPSTREAM_HOST = os.environ.get("PRIVACY_PROXY_UPSTREAM_HOST", "upstream")
 UPSTREAM_PORT = int(os.environ.get("PRIVACY_PROXY_UPSTREAM_PORT", "8081"))
 LISTEN_HOST = os.environ.get("PRIVACY_PROXY_HOST", "0.0.0.0")
@@ -31,27 +33,10 @@ HOP_BY_HOP_HEADERS = {
     "content-length",
     "host",
 }
-TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
-def _json_bytes(payload: dict[str, Any]) -> bytes:
+def _json_bytes(payload: dict[str, object]) -> bytes:
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
-
-
-def _is_truthy(value: str | None) -> bool:
-    return bool(value and value.strip().casefold() in TRUE_VALUES)
-
-
-def _error_payload(status: int, message: str, *, matched: str | None = None) -> bytes:
-    payload: dict[str, Any] = {
-        "error": "privacy_gateway_blocked",
-        "message": message,
-        "status": status,
-        "blocked_by": "privacy-proxy",
-    }
-    if matched:
-        payload["matched"] = matched
-    return _json_bytes(payload)
 
 
 def _read_body(handler: BaseHTTPRequestHandler) -> bytes:
@@ -77,7 +62,7 @@ def _headers_for_upstream(handler: BaseHTTPRequestHandler, body: bytes) -> dict[
         lowered = key.casefold()
         if lowered in HOP_BY_HOP_HEADERS:
             continue
-        if lowered == "x-privacy-encrypted":
+        if lowered == DEFAULT_ENCRYPTED_HEADER.casefold():
             continue
         headers[key] = value
     headers["Host"] = f"{UPSTREAM_HOST}:{UPSTREAM_PORT}"
@@ -112,16 +97,23 @@ class PrivacyProxyHandler(BaseHTTPRequestHandler):
         if body and self.command != "HEAD":
             self.wfile.write(body)
 
-    def _send_error_json(self, status: int, message: str, *, matched: str | None = None) -> None:
-        body = _error_payload(status, message, matched=matched)
-        self._send(
+    def _send_error_json(
+        self,
+        status: int,
+        message: str,
+        *,
+        matched: str | None = None,
+        include_match: bool = True,
+    ) -> None:
+        error = build_block_error(
             status,
-            body,
-            {
-                "Content-Type": "application/json",
-                "X-Privacy-Proxy": "blocked",
-            },
+            message,
+            blocked_by="privacy-proxy",
+            matched=matched,
+            include_match=include_match,
+            headers={"X-Privacy-Proxy": "blocked"},
         )
+        self._send(error.status, _json_bytes(error.body), error.headers)
 
     def _handle(self) -> None:
         try:
@@ -130,22 +122,20 @@ class PrivacyProxyHandler(BaseHTTPRequestHandler):
             self._send_error_json(413, str(exc))
             return
 
-        incoming_text = _decode_text(incoming_body)
-        encrypted_request = _is_truthy(self.headers.get("X-Privacy-Encrypted"))
-        if encrypted_request and incoming_text:
-            try:
-                incoming_text = FILTER.decrypt_payload("text", incoming_text, CRYPTO_KEY).content
-            except PrivacyGatewayError as exc:
-                self._send_error_json(400, f"request decryption failed: {exc}")
-                return
-
-        request_decision = FILTER.check_text(incoming_text)
-        if request_decision.blocked:
-            matched = request_decision.match.detected_word if request_decision.match else None
+        inbound = FILTER.process_inbound_text(
+            _decode_text(incoming_body),
+            crypto_key=CRYPTO_KEY,
+            encrypted=is_encrypted_request(self.headers),
+        )
+        if inbound.error:
+            self._send_error_json(400, f"request decryption failed: {inbound.error.message}")
+            return
+        if inbound.decision.blocked:
+            matched = inbound.decision.match.detected_word if inbound.decision.match else None
             self._send_error_json(422, "forward injection detected", matched=matched)
             return
 
-        upstream_body = incoming_text.encode("utf-8")
+        upstream_body = inbound.content.encode("utf-8")
         upstream_url = f"http://{UPSTREAM_HOST}:{UPSTREAM_PORT}{self.path}"
         upstream_headers = _headers_for_upstream(self, upstream_body)
         request = urllib.request.Request(
@@ -168,28 +158,25 @@ class PrivacyProxyHandler(BaseHTTPRequestHandler):
             self._send_error_json(502, f"upstream request failed: {exc}")
             return
 
-        response_text = _decode_text(response_body)
-        response_decision = FILTER.check_text(response_text)
-        if response_decision.blocked:
+        outbound = FILTER.process_outbound_text(
+            _decode_text(response_body),
+            crypto_key=CRYPTO_KEY,
+            encrypt=True,
+        )
+        if outbound.decision.blocked:
             # Do not echo the upstream response or matched phrase back to the
             # client on reverse-injection failures; the upstream body is treated
             # as untrusted output.
-            self._send_error_json(502, "reverse injection detected")
+            self._send_error_json(502, "reverse injection detected", include_match=False)
+            return
+        if outbound.error:
+            self._send_error_json(500, f"response encryption failed: {outbound.error.message}")
             return
 
-        if response_text:
-            try:
-                encrypted_body = FILTER.encrypt_payload("text", response_text, CRYPTO_KEY).content.encode("utf-8")
-            except PrivacyGatewayError as exc:
-                self._send_error_json(500, f"response encryption failed: {exc}")
-                return
-        else:
-            encrypted_body = b""
-
         response_headers["Content-Type"] = "text/plain; charset=utf-8"
-        response_headers["X-Privacy-Encrypted"] = "1"
+        response_headers[DEFAULT_ENCRYPTED_HEADER] = "1"
         response_headers["X-Privacy-Proxy"] = "encrypted"
-        self._send(upstream_status, encrypted_body, response_headers)
+        self._send(upstream_status, outbound.content.encode("utf-8"), response_headers)
 
     def do_GET(self) -> None:  # noqa: N802
         self._handle()

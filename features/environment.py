@@ -17,3 +17,6 @@ def before_scenario(context, scenario):  # noqa: ARG001
     context.stream_match = None
     # Optional helpers used by streaming tests are also reset per scenario.
     context.api_exported_classes = {}
+    context.text_processing_result = None
+    context.settings = None
+    context.http_block_error = None

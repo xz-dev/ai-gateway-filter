@@ -13,10 +13,12 @@ from privacy_gateway.lib import (  # noqa: F401
     PrivacyGatewayFilter,
     SensitiveMatch,
     SensitiveTextStreamDetector,
+    ImageCryptoError,
     TextCryptoError,
     TextCryptoKeyError,
+    TextProcessingError,
+    TextProcessingResult,
     UnsupportedPayloadTypeError,
-    ImageCryptoError,
 )
 
 __all__ = [
@@ -28,6 +30,8 @@ __all__ = [
     "SensitiveTextStreamDetector",
     "TextCryptoError",
     "TextCryptoKeyError",
+    "TextProcessingError",
+    "TextProcessingResult",
     "ImageCryptoError",
     "UnsupportedPayloadTypeError",
     "__version__",

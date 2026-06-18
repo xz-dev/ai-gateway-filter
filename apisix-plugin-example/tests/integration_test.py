@@ -9,10 +9,12 @@ import urllib.request
 from dataclasses import dataclass
 
 from privacy_gateway import PrivacyGatewayFilter
+from privacy_gateway.config import get_settings
 
 BASE_URL = os.environ.get("APISIX_BASE_URL", "http://apisix:9080").rstrip("/")
-CRYPTO_KEY = os.environ.get("PRIVACY_GATEWAY_CRYPTO_KEY", "WmZq4t7w!z%C&F)J")
-FILTER = PrivacyGatewayFilter()
+SETTINGS = get_settings()
+CRYPTO_KEY = SETTINGS.crypto_key or "WmZq4t7w!z%C&F)J"
+FILTER = PrivacyGatewayFilter.from_settings(SETTINGS)
 
 
 @dataclass(frozen=True)
@@ -53,11 +55,11 @@ def request(path: str, body: str = "", headers: dict[str, str] | None = None, me
 
 def decrypt_response(result: HTTPResult) -> str:
     assert result.headers.get("x-privacy-encrypted") == "1", result.headers
-    return FILTER.decrypt_payload("text", result.body, CRYPTO_KEY).content
+    return FILTER.decrypt_text(result.body, CRYPTO_KEY)
 
 
 def encrypt_request(text: str) -> str:
-    return FILTER.encrypt_payload("text", text, CRYPTO_KEY).content
+    return FILTER.encrypt_text(text, CRYPTO_KEY)
 
 
 def wait_for_route() -> None:
