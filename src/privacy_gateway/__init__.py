@@ -23,6 +23,8 @@ from privacy_gateway.lib import (  # noqa: F401
     UnsupportedPayloadTypeError,
 )
 
+from privacy_gateway.services.privacy_tokens import SecretTokenStreamRestorer
+
 __all__ = [
     "CryptoOperationResult",
     "FilterDecision",
@@ -37,6 +39,7 @@ __all__ = [
     "TextProcessingResult",
     "ImageCryptoError",
     "UnsupportedPayloadTypeError",
+    "SecretTokenStreamRestorer",
     "__version__",
 ]
 

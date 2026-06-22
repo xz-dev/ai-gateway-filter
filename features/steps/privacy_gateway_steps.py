@@ -58,6 +58,13 @@ def _check_text(context, text: str) -> None:
     context.last_decision = target.check_text(text)
 
 
+def _check_raw_text(context, text: str) -> None:
+    """Evaluate `text` with raw/no-masking semantics."""
+
+    target = getattr(context, "gateway_with_phrases", gateway)
+    context.raw_last_decision = target.check_text_raw(text)
+
+
 def _ensure_stream_matcher(context) -> None:
     context.stream_matcher = getattr(context, "stream_matcher", None) or getattr(context, "gateway_with_phrases", gateway).stream_matcher()
     context.stream_blocked = False
@@ -585,6 +592,9 @@ def step_restore_last_protected_privacy_text(context):
 
 @when('I restore privacy text "{text}"')
 def step_restore_privacy_text(context, text):
+    if "{last_protected_text}" in text:
+        assert context.last_protected_text is not None
+        text = text.replace("{last_protected_text}", context.last_protected_text)
     context.last_restored_text = _privacy_filter(context).restore_privacy_text(text)
 
 
@@ -688,3 +698,153 @@ def step_restored_privacy_text_is(context, expected):
 def step_both_protected_privacy_texts_restore_to(context, expected):
     assert _privacy_filter(context).restore_privacy_text(context.first_protected_text) == expected
     assert _privacy_filter(context).restore_privacy_text(context.second_protected_text) == expected
+
+
+
+@when('I check raw text "{text}"')
+def step_check_raw_text(context, text):
+    _check_raw_text(context, text)
+
+
+@then('raw text check result is "{result}"')
+def step_raw_check_result(context, result):
+    assert context.raw_last_decision is not None
+    assert context.raw_last_decision.blocked == (result == "blocked")
+
+
+@then('raw text check matched phrase is "{word}"')
+def step_raw_check_matched_phrase(context, word):
+    assert context.raw_last_decision is not None
+    assert context.raw_last_decision.match is not None
+    assert context.raw_last_decision.match.detected_word == word
+
+
+@then('text processing content contains "{expected}"')
+def step_text_processing_content_contains(context, expected):
+    assert context.text_processing_result is not None
+    assert context.text_processing_result.content is not None
+    expected_value = expected
+    if "{last_protected_text}" in expected_value:
+        assert context.last_protected_text is not None
+        expected_value = expected_value.replace("{last_protected_text}", context.last_protected_text)
+    assert expected_value in context.text_processing_result.content
+
+
+@then('text processing content contains exactly {count:d} secret tokens')
+def step_text_processing_content_contains_exact_tokens(context, count):
+    assert context.text_processing_result is not None
+    assert context.text_processing_result.content is not None
+    assert context.text_processing_result.content.count("<secret:1:") == count
+
+
+@then('text processing content does not contain "{text}"')
+def step_text_processing_content_does_not_contain(context, text):
+    assert context.text_processing_result is not None
+    assert context.text_processing_result.content is not None
+    assert text not in context.text_processing_result.content
+
+
+@when('I process outbound external privacy text "{text}"')
+def step_process_outbound_external_text(context, text):
+    if "{last_protected_text}" in text:
+        assert context.last_protected_text is not None
+        text = text.replace("{last_protected_text}", context.last_protected_text)
+    context.text_processing_result = _privacy_filter(context).process_outbound_external_text(text)
+
+
+@when('I process inbound provider text "{text}"')
+def step_process_inbound_provider_text(context, text):
+    if "{last_protected_text}" in text:
+        assert context.last_protected_text is not None
+        text = text.replace("{last_protected_text}", context.last_protected_text)
+    context.text_processing_result = _privacy_filter(context).process_inbound_provider_text(text)
+
+
+@when('I create an inbound streaming token restorer with password "{password}"')
+def step_create_inbound_streaming_token_restorer(context, password):
+    context.inbound_token_restorer = _privacy_filter(context).inbound_token_restorer(
+        privacy_password=password,
+    )
+    context.inbound_stream_chunks = []
+    context.inbound_stream_output = ""
+
+
+@when('I create an inbound streaming token restorer with password "{password}" and max pending token chars {max_chars:d}')
+def step_create_bounded_inbound_streaming_token_restorer(context, password, max_chars):
+    context.inbound_token_restorer = _privacy_filter(context).inbound_token_restorer(
+        privacy_password=password,
+        max_pending_token_chars=max_chars,
+    )
+    context.inbound_stream_chunks = []
+    context.inbound_stream_output = ""
+
+
+@when('I stream the last protected privacy text in three chunks through inbound restorer')
+def step_stream_last_protected_text_in_three_chunks(context):
+    assert context.last_protected_text is not None
+    assert context.inbound_token_restorer is not None
+
+    payload = f"before {context.last_protected_text} after"
+    cut1 = 7
+    cut2 = 17
+    chunked = [payload[:cut1], payload[cut1:cut2], payload[cut2:]]
+
+    for chunk in chunked:
+        restored_chunk = context.inbound_token_restorer.feed(chunk)
+        context.inbound_stream_chunks.append(restored_chunk)
+        context.inbound_stream_output += restored_chunk
+
+    context.inbound_stream_output += context.inbound_token_restorer.flush()
+
+
+@when('I stream the last protected privacy text split inside the token prefix through inbound restorer')
+def step_stream_last_protected_text_split_inside_prefix(context):
+    assert context.last_protected_text is not None
+    assert context.inbound_token_restorer is not None
+
+    payload = f"before {context.last_protected_text} after"
+    prefix_start = payload.index("<secret:1:")
+    chunked = [
+        payload[: prefix_start + 4],
+        payload[prefix_start + 4 : prefix_start + 8],
+        payload[prefix_start + 8 :],
+    ]
+
+    for chunk in chunked:
+        restored_chunk = context.inbound_token_restorer.feed(chunk)
+        context.inbound_stream_chunks.append(restored_chunk)
+        context.inbound_stream_output += restored_chunk
+
+    context.inbound_stream_output += context.inbound_token_restorer.flush()
+
+
+@when('I feed inbound stream chunk "{chunk}"')
+def step_feed_inbound_stream_chunk(context, chunk):
+    assert context.inbound_token_restorer is not None
+    context.inbound_stream_output += context.inbound_token_restorer.feed(chunk)
+
+
+@when('I flush inbound stream')
+def step_flush_inbound_stream(context):
+    assert context.inbound_token_restorer is not None
+    context.inbound_stream_output += context.inbound_token_restorer.flush()
+
+
+@then('inbound stream emitted chunks are')
+def step_inbound_stream_emitted_chunks(context):
+    assert context.inbound_stream_chunks is not None
+    expected = [row['chunk'].replace("∅", "").replace("␠", " ") for row in context.table]
+    actual = context.inbound_stream_chunks
+    assert actual == expected
+
+
+@then('inbound stream output is "{expected}"')
+def step_inbound_stream_output(context, expected):
+    assert context.inbound_stream_output is not None
+    assert context.inbound_stream_output == expected
+
+
+@then('inbound stream flush output is "{expected}"')
+def step_inbound_stream_flush_output(context, expected):
+    assert context.inbound_stream_output is not None
+    assert context.inbound_stream_output == expected

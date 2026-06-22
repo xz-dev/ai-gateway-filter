@@ -13,8 +13,13 @@ def before_scenario(context, scenario):  # noqa: ARG001
     context.content = None
     context.crypto_key = None
     context.last_decision = None
+    context.raw_last_decision = None
     context.stream_blocked = False
     context.stream_match = None
+    # Streaming token restoration helpers for phase-1 phase-in APIs.
+    context.inbound_token_restorer = None
+    context.inbound_stream_chunks: list[str] = []
+    context.inbound_stream_output = ""
     # Optional helpers used by streaming tests are also reset per scenario.
     context.api_exported_classes = {}
     context.text_processing_result = None

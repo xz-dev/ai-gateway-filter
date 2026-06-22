@@ -3,7 +3,7 @@ from __future__ import annotations
 """Natural-language privacy protection and restoration helpers."""
 
 from privacy_gateway.services.pii_detection import PiiDetectionService, PiiSpan
-from privacy_gateway.services.privacy_tokens import SecretTokenService
+from privacy_gateway.services.privacy_tokens import SecretTokenService, SecretTokenStreamRestorer
 
 
 class TextPrivacyService:
@@ -44,6 +44,32 @@ class TextPrivacyService:
         if not text:
             return text
         return self._token_service.restore_text(text, password)
+
+    def restore_text_best_effort(self, text: str, password: str | None = None) -> str:
+        """Restore all supported secret tokens, preserving undecryptable tokens unchanged."""
+
+        if not text:
+            return text
+        return self._token_service.restore_text_best_effort(text, password)
+
+    def stream_restorer(
+        self,
+        password: str | None = None,
+        *,
+        token_prefix: str | None = None,
+        max_pending_token_chars: int | None = None,
+    ) -> SecretTokenStreamRestorer:
+        """Create an incremental secret-token restorer for streamed text."""
+
+        kwargs = {}
+        if max_pending_token_chars is not None:
+            kwargs["max_pending_token_chars"] = max_pending_token_chars
+        return SecretTokenStreamRestorer(
+            token_service=self._token_service,
+            password=password,
+            token_prefix=token_prefix,
+            **kwargs,
+        )
 
     def strip_tokens(self, text: str, replacement: str = " <secret> ") -> str:
         """Mask token bodies before prompt-injection checks or logging."""

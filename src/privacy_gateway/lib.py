@@ -338,6 +338,19 @@ class PrivacyGatewayFilter:
             self._resolve_privacy_password(privacy_password=privacy_password),
         )
 
+    def restore_privacy_text_best_effort(
+        self,
+        content: str,
+        *,
+        privacy_password: str | None = None,
+    ) -> str:
+        """Best-effort restore for non-sensitive inbound semantic content."""
+
+        return self._privacy_text.restore_text_best_effort(
+            content,
+            self._privacy_password if privacy_password is None else privacy_password,
+        )
+
     def protect_privacy_text(self, content: str, *, privacy_password: str | None = None) -> str:
         """Replace detected PII entities with reversible ``<secret:1:...>`` tokens."""
 
@@ -352,7 +365,11 @@ class PrivacyGatewayFilter:
         *,
         privacy_password: str | None = None,
     ) -> TextProcessingResult:
-        """Restore secret tokens automatically, then run prompt-injection checks."""
+        """Restore secret tokens automatically, then run prompt-injection checks.
+
+        This legacy helper preserves fail-closed behavior for malformed secret tokens.
+        New direction-aware providers should use :meth:`process_inbound_provider_text`.
+        """
 
         try:
             plaintext = self.restore_privacy_text(content, privacy_password=privacy_password)
@@ -365,6 +382,48 @@ class PrivacyGatewayFilter:
 
         decision = self.check_text(plaintext)
         return TextProcessingResult(content=plaintext if not decision.blocked else "", decision=decision)
+
+    def process_inbound_provider_text(
+        self,
+        content: str,
+        *,
+        privacy_password: str | None = None,
+    ) -> TextProcessingResult:
+        """Best-effort restore known tokens, then run semantic injection checks.
+
+        Undecryptable but structurally valid tokens remain unchanged and do not
+        raise errors. New plaintext PII from the provider is passed through.
+        """
+
+        plaintext = self.restore_privacy_text_best_effort(
+            content,
+            privacy_password=self._privacy_password if privacy_password is None else privacy_password,
+        )
+        decision = self.check_text_raw(plaintext)
+        return TextProcessingResult(content=plaintext if not decision.blocked else "", decision=decision)
+
+    def process_outbound_external_text(
+        self,
+        content: str,
+        *,
+        privacy_password: str | None = None,
+    ) -> TextProcessingResult:
+        """Check text for injection, then tokenize new PII for outbound traffic."""
+
+        decision = self.check_text_raw(content)
+        if decision.blocked:
+            return TextProcessingResult(content="", decision=decision)
+
+        try:
+            tokenized = self.protect_privacy_text(content, privacy_password=privacy_password)
+        except TextCryptoError as exc:
+            return TextProcessingResult(
+                content="",
+                decision=decision,
+                error=TextProcessingError(code="secret_token_encryption_failed", message=str(exc)),
+            )
+
+        return TextProcessingResult(content=tokenized, decision=decision)
 
     def process_outbound_privacy_text(
         self,
@@ -391,17 +450,62 @@ class PrivacyGatewayFilter:
             )
 
     def check_text(self, text: str) -> FilterDecision:
-        """Evaluate non-stream text and return a filter decision."""
+        """Evaluate non-stream text and return a filter decision.
+
+        This legacy check preserves compatibility behavior: inspect the original
+        text first, then inspect a token-masked candidate to avoid missing
+        plaintext around supported tokens. Direction-specific APIs use
+        :meth:`check_text_raw` instead.
+        """
 
         candidates = [text]
         masked = self._privacy_text.strip_tokens(text)
         if masked != text:
             candidates.append(masked)
         for candidate in candidates:
-            match = self._sensitive.find(candidate)
-            if match:
-                return FilterDecision.block(match)
+            decision = self.check_text_raw(candidate)
+            if decision.blocked:
+                return decision
         return FilterDecision.allow()
+
+    def check_text_raw(self, text: str) -> FilterDecision:
+        """Evaluate injection phrases against current semantic text without masking."""
+
+        if not text:
+            return FilterDecision.allow()
+        match = self._sensitive.find(text)
+        return FilterDecision.block(match) if match else FilterDecision.allow()
+
+    def inbound_token_restorer(
+        self,
+        *,
+        privacy_password: str | None = None,
+        token_prefix: str | None = None,
+        max_pending_token_chars: int | None = None,
+    ):
+        """Create an inbound streaming token restorer for provider responses."""
+
+        resolved_password = privacy_password if privacy_password is not None else self._privacy_password
+        return self._privacy_text.stream_restorer(
+            resolved_password,
+            token_prefix=token_prefix,
+            max_pending_token_chars=max_pending_token_chars,
+        )
+
+    def streaming_inbound_token_restorer(
+        self,
+        *,
+        privacy_password: str | None = None,
+        token_prefix: str | None = None,
+        max_pending_token_chars: int | None = None,
+    ):
+        """Alias for :meth:`inbound_token_restorer` with a clearer streaming name."""
+
+        return self.inbound_token_restorer(
+            privacy_password=privacy_password,
+            token_prefix=token_prefix,
+            max_pending_token_chars=max_pending_token_chars,
+        )
 
     def stream_matcher(self, *, max_window: int | None = None) -> SensitiveTextStreamDetector:
         """Create a stateful streaming matcher for incremental chunk checks."""
